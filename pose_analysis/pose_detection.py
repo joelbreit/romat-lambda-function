@@ -185,26 +185,49 @@ class PoseDetection:
         None
         """
         if landmark_names[1] in self.landmark_positions:
-            x, y = self.landmark_positions[landmark_names[1]] + 10
-            cv.rectangle(
-                self.processed_frame, (x, y - 15), (x + 50, y + 5), (0, 0, 0), -1
-            )
-            angle_value = 0
+            x, y = self.landmark_positions[landmark_names[1]]
+            
+            # Format the angle label
             try:
                 angle_value = self.angle(landmark_names)
+                
+                # Create more readable label
+                joint_name = landmark_names[1].replace('_', ' ').title()
+                
+                # Draw background for better visibility
+                cv.rectangle(
+                    self.processed_frame, 
+                    (x - 5, y - 35), 
+                    (x + 95, y - 5), 
+                    (0, 0, 0), 
+                    -1
+                )
+                
+                # Draw angle value with joint name
+                cv.putText(
+                    self.processed_frame,
+                    f"{joint_name}",
+                    (x, y - 20),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.4,
+                    (255, 255, 255),
+                    1,
+                    cv.LINE_AA,
+                )
+                
+                cv.putText(
+                    self.processed_frame,
+                    f"{angle_value:.1f}",
+                    (x, y - 5),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),  # Yellow color for better visibility
+                    1,
+                    cv.LINE_AA,
+                )
+                
             except Exception as e:
                 print(f"Error calculating angle: {e}")
-
-            cv.putText(
-                self.processed_frame,
-                f"{angle_value:.1f}",
-                (x, y),
-                cv.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (255, 255, 255),
-                1,
-                cv.LINE_AA,
-            )
 
 
 if __name__ == "__main__":
