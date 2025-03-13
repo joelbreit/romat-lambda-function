@@ -91,9 +91,9 @@ def lambda_handler(event, context):
         # Upload min/max images
         for image_file in [
             "minPlain.png",
-            "minLandmarks.png",
+            "minImage.png",
             "maxPlain.png",
-            "maxLandmarks.png",
+            "maxImage.png",
         ]:
             file_path = f"{tmpDirectoryPath}/{image_file}"
             if os.path.exists(file_path):
@@ -213,7 +213,7 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
         )
 
     if min_frame_landmarks is not None:
-        min_landmarks_path = f"{output_dir_path}/minLandmarks.png"
+        min_landmarks_path = f"{output_dir_path}/minImage.png"
         OpenCV.imwrite(min_landmarks_path, min_frame_landmarks)
         print(f"Saved min angle landmarks frame -> {min_landmarks_path}")
 
@@ -225,7 +225,7 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
         )
 
     if max_frame_landmarks is not None:
-        max_landmarks_path = f"{output_dir_path}/maxLandmarks.png"
+        max_landmarks_path = f"{output_dir_path}/maxImage.png"
         OpenCV.imwrite(max_landmarks_path, max_frame_landmarks)
         print(f"Saved max angle landmarks frame -> {max_landmarks_path}")
 
