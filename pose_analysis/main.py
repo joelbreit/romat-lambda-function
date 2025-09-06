@@ -9,6 +9,12 @@ import logging
 import time
 import datetime
 
+# import shutil
+
+# # Remove /tmp directory contents
+# shutil.rmtree("/tmp", ignore_errors=True)
+# os.mkdir("/tmp")  # Recreate the directory to avoid issues
+
 # Suppress MediaPipe warnings
 os.environ["MEDIAPIPE_DISABLE_GPU"] = "1"
 warnings.filterwarnings("ignore", category=UserWarning, module="google.protobuf")
@@ -22,7 +28,7 @@ s3 = boto3.client("s3")
 
 def lambda_handler(event, context):
     start_time = time.time()
-    
+
     print(f"event: {event}")
     # get the body of the event
     body = json.loads(event["body"])
@@ -116,7 +122,7 @@ def lambda_handler(event, context):
         }
 
     calculate_lambda_cost(start_time, context)
-    
+
     return {"statusCode": 200, "body": json.dumps(est_angles)}
 
 
@@ -146,7 +152,7 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
     frame_step = max(frames // frame_step, 1)
     print(f"video frame step: {frame_step}")
 
-    if width > 1000 and height > 1000:
+    if width > 200 and height > 200:
         size = (width // 2, height // 2)
     else:
         size = (width, height)
@@ -194,52 +200,56 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
         if frame_with_landmarks is not None:
             # Add video information overlay
             timestamp = frame_index / fps
-            
+
             # Create information text
             info_text = f"Frame: {frame_index} | Time: {timestamp:.2f}s"
-            
+
             # Add angle information if available
             angle_info = []
             for angle_type, angle_list in est_angles.items():
                 if angle_list and len(angle_list) > 0:
                     current_angle = angle_list[-1]  # Get most recent angle
-                    readable_angle = angle_type.replace('_angles', '').replace('_', ' ').title()
+                    readable_angle = (
+                        angle_type.replace("_angles", "").replace("_", " ").title()
+                    )
                     angle_info.append(f"{readable_angle}: {current_angle:.1f}")
-            
+
             if angle_info:
                 info_text += " | " + " | ".join(angle_info)
-            
+
             # Draw info text at the bottom of the frame
             h, w, _ = frame_with_landmarks.shape
             font = OpenCV.FONT_HERSHEY_SIMPLEX
             font_scale = 0.6
             font_thickness = 1
             font_color = (255, 255, 255)  # White text
-            
+
             # Measure text size for background rectangle
-            text_size = OpenCV.getTextSize(info_text, font, font_scale, font_thickness)[0]
-            
+            text_size = OpenCV.getTextSize(info_text, font, font_scale, font_thickness)[
+                0
+            ]
+
             # Draw background rectangle
             OpenCV.rectangle(
-                frame_with_landmarks, 
-                (10, h - 10 - text_size[1] - 10), 
-                (10 + text_size[0] + 10, h - 10), 
+                frame_with_landmarks,
+                (10, h - 10 - text_size[1] - 10),
+                (10 + text_size[0] + 10, h - 10),
                 (0, 0, 0, 0.7),  # Semi-transparent black
-                -1
+                -1,
             )
-            
+
             # Draw text
             OpenCV.putText(
-                frame_with_landmarks, 
-                info_text, 
-                (15, h - 15), 
-                font, 
-                font_scale, 
-                font_color, 
-                font_thickness, 
-                OpenCV.LINE_AA
+                frame_with_landmarks,
+                info_text,
+                (15, h - 15),
+                font,
+                font_scale,
+                font_color,
+                font_thickness,
+                OpenCV.LINE_AA,
             )
-            
+
             # Write frame to landmark video
             video_writer.write(frame_with_landmarks)
 
@@ -274,7 +284,9 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
 
     if min_frame_landmarks is not None:
         # Add labels to the min frame with landmarks
-        labeled_min_frame = add_frame_labels(min_frame_landmarks, min_angle_type, min_angle, is_min=True)
+        labeled_min_frame = add_frame_labels(
+            min_frame_landmarks, min_angle_type, min_angle, is_min=True
+        )
         min_landmarks_path = f"{output_dir_path}/minImage.png"
         OpenCV.imwrite(min_landmarks_path, labeled_min_frame)
         print(f"Saved min angle landmarks frame -> {min_landmarks_path}")
@@ -288,7 +300,9 @@ def process_video(video_file_path, output_dir_path, frame_step: int, angles: Lis
 
     if max_frame_landmarks is not None:
         # Add labels to the max frame with landmarks
-        labeled_max_frame = add_frame_labels(max_frame_landmarks, max_angle_type, max_angle, is_max=True)
+        labeled_max_frame = add_frame_labels(
+            max_frame_landmarks, max_angle_type, max_angle, is_max=True
+        )
         max_landmarks_path = f"{output_dir_path}/maxImage.png"
         OpenCV.imwrite(max_landmarks_path, labeled_max_frame)
         print(f"Saved max angle landmarks frame -> {max_landmarks_path}")
@@ -316,17 +330,17 @@ def draw_leg_landmarks(frame, pose_detection, side):
         leg_connections = [
             (mp_pose.PoseLandmark.LEFT_HIP, mp_pose.PoseLandmark.LEFT_KNEE),
             (mp_pose.PoseLandmark.LEFT_KNEE, mp_pose.PoseLandmark.LEFT_ANKLE),
-            (mp_pose.PoseLandmark.LEFT_ANKLE, mp_pose.PoseLandmark.LEFT_HEEL),
-            (mp_pose.PoseLandmark.LEFT_HEEL, mp_pose.PoseLandmark.LEFT_FOOT_INDEX),
-            (mp_pose.PoseLandmark.LEFT_ANKLE, mp_pose.PoseLandmark.LEFT_FOOT_INDEX),
+            # (mp_pose.PoseLandmark.LEFT_ANKLE, mp_pose.PoseLandmark.LEFT_HEEL),
+            # (mp_pose.PoseLandmark.LEFT_HEEL, mp_pose.PoseLandmark.LEFT_FOOT_INDEX),
+            # (mp_pose.PoseLandmark.LEFT_ANKLE, mp_pose.PoseLandmark.LEFT_FOOT_INDEX),
         ]
     elif side == "right":
         leg_connections = [
             (mp_pose.PoseLandmark.RIGHT_HIP, mp_pose.PoseLandmark.RIGHT_KNEE),
             (mp_pose.PoseLandmark.RIGHT_KNEE, mp_pose.PoseLandmark.RIGHT_ANKLE),
-            (mp_pose.PoseLandmark.RIGHT_ANKLE, mp_pose.PoseLandmark.RIGHT_HEEL),
-            (mp_pose.PoseLandmark.RIGHT_HEEL, mp_pose.PoseLandmark.RIGHT_FOOT_INDEX),
-            (mp_pose.PoseLandmark.RIGHT_ANKLE, mp_pose.PoseLandmark.RIGHT_FOOT_INDEX),
+            # (mp_pose.PoseLandmark.RIGHT_ANKLE, mp_pose.PoseLandmark.RIGHT_HEEL),
+            # (mp_pose.PoseLandmark.RIGHT_HEEL, mp_pose.PoseLandmark.RIGHT_FOOT_INDEX),
+            # (mp_pose.PoseLandmark.RIGHT_ANKLE, mp_pose.PoseLandmark.RIGHT_FOOT_INDEX),
         ]
 
     # Draw only specified landmarks
@@ -335,8 +349,11 @@ def draw_leg_landmarks(frame, pose_detection, side):
         # Draw landmarks
         for i, landmark in enumerate(landmarks.landmark):
             # Only draw hip, knee, ankle, heel and foot index
-            if (side == "left" and i in [23, 25, 27, 29, 31]) or (
-                side == "right" and i in [24, 26, 28, 30, 32]
+            # 23: LEFT_HIP, 24: RIGHT_HIP
+            # 25: LEFT_KNEE, 26: RIGHT_KNEE
+            # 27: LEFT_ANKLE, 28: RIGHT_ANKLE
+            if (side == "left" and i in [23, 25, 27]) or (
+                side == "right" and i in [24, 26, 28]
             ):
                 h, w, c = frame.shape
                 cx, cy = int(landmark.x * w), int(landmark.y * h)
@@ -431,27 +448,28 @@ def estimate_pose(frame, angles: List[str], est_angles: Dict[str, List[float]]):
 
     return processed_frame if processed_frame is not None else None, est_angles
 
+
 def add_frame_labels(frame, angle_type, angle_value, is_min=False, is_max=False):
     """
     Add descriptive labels to min/max frames.
-    
+
     Args:
         frame: The image frame to label
         angle_type: Type of angle (e.g., 'left_knee_angles')
         angle_value: The angle value
         is_min: Whether this is a minimum angle frame
         is_max: Whether this is a maximum angle frame
-    
+
     Returns:
         Labeled frame
     """
     # Create a copy to avoid modifying the original
     labeled_frame = frame.copy()
     h, w, _ = labeled_frame.shape
-    
+
     # Format the angle name to be more readable
-    readable_angle = angle_type.replace('_angles', '').replace('_', ' ').title()
-    
+    readable_angle = angle_type.replace("_angles", "").replace("_", " ").title()
+
     # Create the label text
     if is_min:
         label = f"Minimum {readable_angle}: {angle_value:.1f}"
@@ -459,93 +477,96 @@ def add_frame_labels(frame, angle_type, angle_value, is_min=False, is_max=False)
         label = f"Maximum {readable_angle}: {angle_value:.1f}"
     else:
         label = f"{readable_angle}: {angle_value:.1f}"
-    
+
     # Define text properties
     font = OpenCV.FONT_HERSHEY_SIMPLEX
     font_scale = 0.8
     font_thickness = 2
     font_color = (255, 255, 255)  # White text
-    
+
     # Add a background rectangle for better visibility
     text_size = OpenCV.getTextSize(label, font, font_scale, font_thickness)[0]
     text_x = 10
     text_y = 30
-    
+
     # Draw background rectangle
     OpenCV.rectangle(
-        labeled_frame, 
-        (text_x - 5, text_y - text_size[1] - 5), 
-        (text_x + text_size[0] + 5, text_y + 5), 
+        labeled_frame,
+        (text_x - 5, text_y - text_size[1] - 5),
+        (text_x + text_size[0] + 5, text_y + 5),
         (0, 0, 0),  # Black background
-        -1
+        -1,
     )
-    
+
     # Draw text
     OpenCV.putText(
-        labeled_frame, 
-        label, 
-        (text_x, text_y), 
-        font, 
-        font_scale, 
-        font_color, 
-        font_thickness, 
-        OpenCV.LINE_AA
+        labeled_frame,
+        label,
+        (text_x, text_y),
+        font,
+        font_scale,
+        font_color,
+        font_thickness,
+        OpenCV.LINE_AA,
     )
-    
+
     return labeled_frame
+
 
 def calculate_lambda_cost(start_time, context):
     """
     Calculate and log the cost of the Lambda execution.
-    
+
     Args:
         start_time (float): The start time of execution (from time.time())
         context (LambdaContext): The Lambda context object
-    
+
     Returns:
         dict: Cost details including duration, memory, and estimated cost
     """
     # Calculate duration in seconds
     duration = time.time() - start_time
-    
+
     # Get allocated memory in MB
     memory_size = int(context.memory_limit_in_mb)
-    
+
     print(f"Memory size: {memory_size} MB")
-    
+
     # Current Lambda pricing (as of March 2025)
     # These rates may change, so update as needed
     REQUEST_PRICE = 0.0000002  # $0.20 per 1 million requests
     DURATION_PRICE_PER_GB_SECOND = 0.0000166667  # $0.0000166667 per GB-second
-    
+
     # Calculate GB-seconds
     gb_seconds = (memory_size / 1024) * duration
-    
+
     # Calculate cost
     request_cost = REQUEST_PRICE
     duration_cost = DURATION_PRICE_PER_GB_SECOND * gb_seconds
     total_cost = request_cost + duration_cost
-    
+
     # Create cost details
     cost_details = {
         "execution_time": {
             "seconds": duration,
-            "formatted": str(datetime.timedelta(seconds=int(duration)))
+            "formatted": str(datetime.timedelta(seconds=int(duration))),
         },
         "memory_allocated_mb": memory_size,
         "gb_seconds": gb_seconds,
         "estimated_cost_usd": {
             "request": request_cost,
             "duration": duration_cost,
-            "total": total_cost
-        }
+            "total": total_cost,
+        },
     }
-    
+
     # Log the cost details
     print(f"Lambda Execution Complete:")
-    print(f"  Duration: {cost_details['execution_time']['formatted']} ({duration:.2f} seconds)")
+    print(
+        f"  Duration: {cost_details['execution_time']['formatted']} ({duration:.2f} seconds)"
+    )
     print(f"  Memory: {memory_size} MB")
     print(f"  GB-Seconds: {gb_seconds:.6f}")
     print(f"  Estimated Cost: ${total_cost:.8f} USD")
-    
+
     return cost_details

@@ -57,13 +57,14 @@ class PoseDetection:
             self.mp_pose.PoseLandmark.RIGHT_FOOT_INDEX: "RIGHT_FOOT_INDEX",
         }
 
-    def process_frame(self, frame, draw=True):
+    def process_frame(self, frame, draw=True, mask_head=True):
         """
         Process a frame and extract pose landmarks.
 
         Args:
                 frame (numpy.ndarray): The input frame to process.
                 draw (bool, optional): Whether to draw the pose landmarks on the frame. Defaults to True.
+                mask_head (bool, optional): Whether to mask the head with a black rectangle. Defaults to True.
 
         Returns:
                 self: The instance of the class with updated pose landmarks and processed frame.
@@ -78,6 +79,10 @@ class PoseDetection:
             print("Could not process frame.")
             return self
 
+        # IMPORTANT: Apply head masking FIRST, before any drawing or frame storage
+        if mask_head:
+            self._apply_head_masking(frame, h, w)
+
         if draw:
             self.mp_draw.draw_landmarks(
                 frame, self.pose_landmarks, self.mp_pose.POSE_CONNECTIONS
@@ -85,22 +90,40 @@ class PoseDetection:
 
         self.processed_frame = frame
 
+        # Store landmark positions for angle calculations
+        for i, landmark in enumerate(self.pose_landmarks.landmark):
+            cx, cy = int(landmark.x * w), int(landmark.y * h)
+            self.landmark_positions[self.landmark_names[i]] = np.array([cx, cy])
+
+            if draw:
+                cv.circle(self.processed_frame, (cx, cy), 5, (255, 0, 0), cv.FILLED)
+
+        return self
+
+    def _apply_head_masking(self, frame, h, w):
+        """Apply head masking to the frame."""
         head_top = None
         head_bottom = None
         head_left = None
         head_right = None
 
+        print("DEBUG: Starting head landmark detection...")
+        head_landmarks_found = []
+
         for i, landmark in enumerate(self.pose_landmarks.landmark):
             cx, cy = int(landmark.x * w), int(landmark.y * h)
-            self.landmark_positions[self.landmark_names[i]] = np.array([cx, cy])
+            landmark_name = self.landmark_names[i]
 
-            if self.landmark_names[i] in [
+            if landmark_name in [
                 "LEFT_EAR",
                 "RIGHT_EAR",
                 "NOSE",
                 "LEFT_SHOULDER",
                 "RIGHT_SHOULDER",
             ]:
+                head_landmarks_found.append(landmark_name)
+                print(f"DEBUG: Found head landmark: {landmark_name} at ({cx}, {cy})")
+
                 if head_top is None or cy < head_top:
                     head_top = cy
                 if head_bottom is None or cy > head_bottom:
@@ -110,32 +133,42 @@ class PoseDetection:
                 if head_right is None or cx > head_right:
                     head_right = cx
 
-            if draw:
-                cv.circle(self.processed_frame, (cx, cy), 5, (255, 0, 0), cv.FILLED)
-
         if (
             head_top is not None
             and head_bottom is not None
             and head_left is not None
             and head_right is not None
         ):
-            # There is no top of head landmark, so we have to adjust the box up a bit
-            height = head_bottom - head_top
-            head_top -= height
+            print("DEBUG: All head bounds found, proceeding with head masking...")
 
-            head = cv.getRectSubPix(
-                self.processed_frame,
-                (head_right - head_left, head_bottom - head_top),
-                ((head_right + head_left) / 2, (head_bottom + head_top) / 2),
+            # Adjust and add padding
+            height = head_bottom - head_top
+            head_top -= int(height * 0.3)
+
+            padding = 20
+            head_top = max(0, head_top - padding)
+            head_bottom = min(h, head_bottom + padding)
+            head_left = max(0, head_left - padding)
+            head_right = min(w, head_right + padding)
+
+            print(
+                f"Head rectangle: ({head_left}, {head_top}) to ({head_right}, {head_bottom})"
             )
 
-            # Cover the head with a black rectangle
-            cv.rectangle(
-                self.processed_frame,
-                (head_left, head_top),
-                (head_right, head_bottom),
-                (0, 0, 0),
-                -1,
+            if head_right > head_left and head_bottom > head_top:
+                # Apply head masking directly to the input frame
+                cv.rectangle(
+                    frame,  # Apply to original frame, not self.processed_frame
+                    (head_left, head_top),
+                    (head_right, head_bottom),
+                    (0, 0, 0),
+                    -1,
+                )
+                print("DEBUG: Head masking applied to frame!")
+        else:
+            print("DEBUG: Not all head bounds found, skipping head masking")
+            print(
+                f"DEBUG: Missing bounds - top: {head_top is None}, bottom: {head_bottom is None}, left: {head_left is None}, right: {head_right is None}"
             )
 
         return self
@@ -143,12 +176,16 @@ class PoseDetection:
     def angle(self, landmark_names):
         """
         Calculate the angle between three landmarks.
+        Returns negative values for hyperextension (beyond straight).
 
         Parameters:
         - landmark_names (list): A list of three landmark names.
 
         Returns:
         - angle (float): The angle between the three landmarks in degrees.
+            * Positive values indicate flexion (bent)
+            * Negative values indicate hyperextension (beyond straight)
+            * 0 degrees represents a perfectly straight joint
         """
         # Check if all landmarks exist
         if not all(landmark in self.landmark_positions for landmark in landmark_names):
@@ -168,9 +205,37 @@ class PoseDetection:
         if norm_ba == 0 or norm_bc == 0:
             return 0.0
 
+        # Calculate the basic angle between the segments
         cosine_angle = np.clip(np.dot(ba, bc) / (norm_ba * norm_bc), -1.0, 1.0)
-        _angle = np.degrees(np.arccos(cosine_angle))
-        _angle = 180 - _angle
+        raw_angle = np.degrees(np.arccos(cosine_angle))
+
+        # Convert to our desired scale where:
+        # 180 degrees = straight joint = 0 in our new scale
+        # < 180 degrees = flexion = positive in our new scale
+        # > 180 degrees = hyperextension = negative in our new scale
+        _angle = 180 - raw_angle
+
+        # Determine if the joint is hyperextended by checking if the middle point
+        # is on the "other side" of the line connecting the outer points
+        # We can use the cross product to determine this
+
+        # For 2D points, we'll use the z component of the cross product
+        # This requires creating 3D vectors from our 2D points
+        ba_3d = np.append(ba, 0)
+        bc_3d = np.append(bc, 0)
+        cross_product = np.cross(ba_3d, bc_3d)[2]
+
+        # If the cross product is negative, the angle is on the other side
+        # (hyperextension), so we negate the angle
+        if cross_product < 0:
+            _angle = -_angle
+
+        # --- FIX: Flip sign for right knee to match left knee convention ---
+        if (
+            landmark_names == ("RIGHT_HIP", "RIGHT_KNEE", "RIGHT_ANKLE")
+            or landmark_names == ["RIGHT_HIP", "RIGHT_KNEE", "RIGHT_ANKLE"]
+        ):
+            _angle = -_angle
 
         return _angle
 
@@ -186,23 +251,23 @@ class PoseDetection:
         """
         if landmark_names[1] in self.landmark_positions:
             x, y = self.landmark_positions[landmark_names[1]]
-            
+
             # Format the angle label
             try:
                 angle_value = self.angle(landmark_names)
-                
+
                 # Create more readable label
-                joint_name = landmark_names[1].replace('_', ' ').title()
-                
+                joint_name = landmark_names[1].replace("_", " ").title()
+
                 # Draw background for better visibility
                 cv.rectangle(
-                    self.processed_frame, 
-                    (x - 5, y - 35), 
-                    (x + 95, y - 5), 
-                    (0, 0, 0), 
-                    -1
+                    self.processed_frame,
+                    (x - 5, y - 35),
+                    (x + 95, y - 5),
+                    (0, 0, 0),
+                    -1,
                 )
-                
+
                 # Draw angle value with joint name
                 cv.putText(
                     self.processed_frame,
@@ -214,18 +279,24 @@ class PoseDetection:
                     1,
                     cv.LINE_AA,
                 )
-                
+
+                # Use different colors for hyperextension (negative angles)
+                text_color = (0, 0, 255) if angle_value < 0 else (0, 255, 255)
+
                 cv.putText(
                     self.processed_frame,
-                    f"{angle_value:.1f}",
+                    f"{angle_value:.1f}°",
                     (x, y - 5),
                     cv.FONT_HERSHEY_SIMPLEX,
                     0.5,
-                    (0, 255, 255),  # Yellow color for better visibility
+                    text_color,  # Red for hyperextension, yellow for flexion
                     1,
                     cv.LINE_AA,
                 )
-                
+
+                cv.imwrite(f"debug_frame_with_rectangle.jpg", self.processed_frame)
+                print("DEBUG: Saved debug frame as 'debug_frame_with_rectangle.jpg'")
+
             except Exception as e:
                 print(f"Error calculating angle: {e}")
 
